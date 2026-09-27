@@ -5,6 +5,17 @@
  Info page and APK download: https://jamorham.github.io/#xdrip-plus
 
 <img align="right" src="https://travis-ci.org/jamorham/xDrip-plus.svg?branch=master"><a align="right" title="Crowdin" target="_blank" href="https://crowdin.com/project/xdrip"><img align="right" src="https://badges.crowdin.net/xdrip/localized.svg"></a>
+## About this fork
+
+This repository is an experimental fork of xDrip+.
+
+It contains additional changes intended primarily for Android 16 and Dexcom ONE+ use, including Bluetooth connection/recovery changes, newer Android compatibility fixes and a separately named `xDripX` debug build so it can coexist with a standard xDrip+ installation.
+
+Users should expect this fork to be less widely tested than upstream xDrip+. In particular, the Dexcom ONE+ Bluetooth changes are experimental and have been tested only with the specific phone, Android version and transmitter setup used by the author. The Wear OS application is used only as a mirror of the phone in this setup; direct transmitter collection on the watch has not been tested.
+
+This fork is not an official xDrip+ release and is not supported by the upstream xDrip+ project. For general xDrip+ use, documentation and support, refer to the upstream project.
+
+Please see README and CHANGES.
 
 ## Features
 * Voice, Keypad or Watch input of Treatments (Insulin/Carbs/Notes)
