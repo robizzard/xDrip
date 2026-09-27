@@ -15,7 +15,7 @@ Users should expect this fork to be less widely tested than upstream xDrip+. In 
 
 This fork is not an official xDrip+ release and is not supported by the upstream xDrip+ project. For general xDrip+ use, documentation and support, refer to the upstream project.
 
-Please see README and CHANGES.
+Please see [README]README and [CHANGES]CHANGES for more details.
 
 ## Features
 * Voice, Keypad or Watch input of Treatments (Insulin/Carbs/Notes)
