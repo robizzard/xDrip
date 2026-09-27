@@ -15,6 +15,14 @@ Most changes are in:
 with FLAG_IMMUTABLE (for newer Android versions) changes in:
 ~/android/xDrip/app/src/main/java/com/eveningoutpost/dexdrip/utilitymodels/Notifications.java
 
+
+
+Remember to set up the SDK. If your build fails, try this:
+
+export ANDROID_HOME="$HOME/Android/Sdk"
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+
 ############################################################
 
 Devices:
