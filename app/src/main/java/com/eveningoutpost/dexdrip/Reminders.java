@@ -1191,8 +1191,8 @@ public class Reminders extends ActivityWithRecycler implements SensorEventListen
                         .setAction(REMINDER_ACTION)
                         .putExtra("snooze_id", reminder.getId())
                         .putExtra(Pref.getBooleanDefaultFalse(Reminder.REMINDERS_CANCEL_DEFAULT) ? "cancel" : "snooze", "true");
-                final PendingIntent deleteIntent = PendingIntent.getBroadcast(xdrip.getAppContext(), NOTIFICATION_ID + 1, notificationDeleteIntent, FLAG_UPDATE_CURRENT);
-                final PendingIntent pendingIntent = PendingIntent.getActivity(xdrip.getAppContext(), NOTIFICATION_ID, notificationIntent, FLAG_UPDATE_CURRENT);
+                final PendingIntent deleteIntent = PendingIntent.getBroadcast(xdrip.getAppContext(), NOTIFICATION_ID + 1, notificationDeleteIntent, FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                final PendingIntent pendingIntent = PendingIntent.getActivity(xdrip.getAppContext(), NOTIFICATION_ID, notificationIntent, FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
                 if (reminder.graphicon) {
                     Treatments.create_note("Reminder"+": " + reminder.getTitle(), tsl());

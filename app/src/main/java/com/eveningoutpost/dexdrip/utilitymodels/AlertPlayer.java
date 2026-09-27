@@ -520,7 +520,13 @@ public class AlertPlayer {
         intent.putExtra("alertType", "bg_alerts");
         intent.putExtra("raisedTimeStamp", JoH.tsl());
         intent.putExtra("minsSinceStartPlaying", minsSinceStartPlaying);
-        return PendingIntent.getService(ctx, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+        //RGI replace the return
+        return PendingIntent.getService(
+            ctx,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        //return PendingIntent.getService(ctx, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     static private int getAlertProfile(Context ctx){

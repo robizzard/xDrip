@@ -384,7 +384,7 @@ public class GcmListenerSvc extends JamListenerSvc {
                             final String[] payloadA = payload.split("\\^");
                             final String title = payloadA[0];
                             final String body = payloadA[1];
-                            final PendingIntent pendingIntent = android.app.PendingIntent.getActivity(xdrip.getAppContext(), 0, new Intent(xdrip.getAppContext(), Home.class), android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+                            final PendingIntent pendingIntent = android.app.PendingIntent.getActivity(xdrip.getAppContext(), 0, new Intent(xdrip.getAppContext(), Home.class), android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
                             showNotification(title, body, pendingIntent, GCM_NOTIFICATION_ITEM, true, true, false);
                             UserError.Log.uel(TAG, "Follower Notification with payload");
                         } catch (Exception e) {

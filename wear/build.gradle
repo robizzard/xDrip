@@ -2,6 +2,8 @@ apply plugin: 'com.android.application'
 //apply from: '../app/token-replace.gradle'
 apply from: '../common.gradle'
 
+def appName = project.findProperty("appName") ?: "xDrip+"
+
 android {
     compileSdkVersion 34
     lintOptions {
@@ -12,7 +14,7 @@ android {
         applicationId "com.eveningoutpost.dexdrip"
         minSdkVersion 21
         //noinspection ExpiredTargetSdkVersion
-        targetSdkVersion 23
+        targetSdkVersion 24 // RGI changed to 24 for Galaxy 4 watch
         versionCode 1
         versionName generateVersionName()
         buildConfigField "int", "buildVersion", generateVersionNumberString()
@@ -21,12 +23,13 @@ android {
         buildConfigField "int", "targetSDK", targetSdkVersion.mApiLevel.toString()
 
         applicationId = "com.eveningoutpost.dexdrip"
-        resValue "string", "label_xdrip", "XDrip"
-        resValue "string", "label_xdrip_large", "XDrip(Large)"
-        resValue "string", "label_xdrip_big_chart", "XDrip(BigChart)"
-        resValue "string", "label_xdrip_circle", "XDrip(Circle)"
-        resValue "string", "label_xdrip_activity", "XDrip Prefs."
-        resValue "string", "app_settings", "XDrip Settings"
+        resValue "string", "label_xdrip", appName
+        resValue "string", "label_xdrip_large", "${appName}(Large)"
+        resValue "string", "label_xdrip_big_chart", "${appName}(BigChart)"
+        resValue "string", "label_xdrip_circle", "${appName}(Circle)"
+        resValue "string", "label_xdrip_activity", "${appName} Prefs."
+        resValue "string", "app_settings", "${appName} Settings"
+
         resValue "string", "build_version_name", "Version: $versionName"
     }
 
@@ -71,6 +74,18 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'),
                     'proguard-rules.pro'
         }
+
+    debug {
+        applicationIdSuffix ".debug"
+
+        resValue "string", "label_xdrip", appName
+        resValue "string", "label_xdrip_large", "${appName}(Large)"
+        resValue "string", "label_xdrip_big_chart", "${appName}(BigChart)"
+        resValue "string", "label_xdrip_circle", "${appName}(Circle)"
+        resValue "string", "label_xdrip_activity", "${appName} Prefs."
+        resValue "string", "app_settings", "${appName} Settings"
+    }
+
     }
 
     flavorDimensions "version"

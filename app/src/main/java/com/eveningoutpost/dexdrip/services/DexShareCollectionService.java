@@ -212,7 +212,7 @@ public class DexShareCollectionService extends Service {
             if (pendingIntent != null)
                 alarm.cancel(pendingIntent);
             long wakeTime = calendar.getTimeInMillis() + retry_in;
-            pendingIntent = PendingIntent.getService(this, 0, new Intent(this, this.getClass()),  PendingIntent.FLAG_UPDATE_CURRENT);
+            pendingIntent = PendingIntent.getService(this, 0, new Intent(this, this.getClass()),  PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeTime, pendingIntent);
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
@@ -231,7 +231,7 @@ public class DexShareCollectionService extends Service {
             if (pendingIntent != null)
                 alarm.cancel(pendingIntent);
             long wakeTime = calendar.getTimeInMillis() + retry_in;
-            pendingIntent = PendingIntent.getService(this, 0, new Intent(this, this.getClass()), 0);
+            pendingIntent = PendingIntent.getService(this, 0, new Intent(this, this.getClass()), PendingIntent.FLAG_IMMUTABLE);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeTime, pendingIntent);
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {

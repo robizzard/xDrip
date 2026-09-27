@@ -39,6 +39,8 @@ repositories {
     }
 }
 
+def appName = project.findProperty("appName") ?: "xDrip+"
+
 android {
     compileSdk 34 // TODO centralize
 
@@ -63,7 +65,9 @@ android {
         minSdkVersion 26
         // increasing target SDK version can cause compatibility issues with Android 7+
         //noinspection ExpiredTargetSdkVersion
-        targetSdkVersion 26
+
+        targetSdkVersion 32 // RGI is now 32 for Android 16
+        
         // change versionCode only when downgrade should be prevented
         // eg, when data structures are incompatible
         versionCode 1603091400
@@ -76,8 +80,10 @@ android {
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         multiDexEnabled false
 
-        manifestPlaceholders = ['appAuthRedirectScheme': 'xdrip',
-                                appId: applicationId
+        manifestPlaceholders = [
+          'appAuthRedirectScheme': 'xdrip',
+           appId: applicationId,
+           appLabel: appName
         ]
     }
 
@@ -161,14 +167,20 @@ android {
                     'proguard-rules.pro'
         }
         debug {
-            minifyEnabled true
-            shrinkResources true
+
+            minifyEnabled false // RGI changed to false
+            shrinkResources false // RGI changed to false
             proguardFiles getDefaultProguardFile('proguard-android.txt'),
                     'proguard-rules.pro'
             testProguardFile 'proguard-debug.pro'
             multiDexKeepProguard file('proguard-debug.pro')
             ext.enableCrashlytics = false
-                  applicationIdSuffix ".debug"
+
+            // use appName from the cmdline
+            applicationIdSuffix ".debug"
+            resValue "string", "app_name", appName
+            resValue "string", "app_name_launcher", appName
+
             versionNameSuffix "-debug"
             debuggable true
         }

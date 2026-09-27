@@ -460,7 +460,7 @@ public class G5CollectionService extends G5BaseService {
             AlarmManager alarm = (AlarmManager) getSystemService(ALARM_SERVICE);
             if (pendingIntent != null)
                 alarm.cancel(pendingIntent);
-            pendingIntent = PendingIntent.getService(this, 0, new Intent(this, this.getClass()), 0);
+            pendingIntent = PendingIntent.getService(this, 0, new Intent(this, this.getClass()), PendingIntent.FLAG_IMMUTABLE);
             // TODO use wakeIntent feature
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeTime, pendingIntent);

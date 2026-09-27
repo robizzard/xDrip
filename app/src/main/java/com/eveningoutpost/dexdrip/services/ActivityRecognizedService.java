@@ -497,7 +497,7 @@ public class ActivityRecognizedService extends IntentService implements GoogleAp
                 JoH.static_toast_long("Google Play Services update download needed for Motion");
                 Intent notificationIntent = new Intent(Intent.ACTION_VIEW);
                 notificationIntent.setData(Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.gms"));
-                final PendingIntent contentIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0);
+                final PendingIntent contentIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
                 JoH.showNotification("Google Update Needed","Google Play Services update download needed for Motion. Download update via Google Play Store and try motion again after installed.",contentIntent,60302,true,true,true);
                 UserError.Log.ueh(TAG,"Google Play Services updated needed for motion - disabling motion for now");
                 Pref.setBoolean("motion_tracking_enabled", false);

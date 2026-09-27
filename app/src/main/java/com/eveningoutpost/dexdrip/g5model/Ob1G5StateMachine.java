@@ -59,6 +59,7 @@ import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.SecretKeySpec;
 
 import io.reactivex.schedulers.Schedulers;
+import io.reactivex.Observable;
 import lombok.val;
 
 import static com.eveningoutpost.dexdrip.g5model.BatteryInfoRxMessage.battery0VException;
@@ -118,6 +119,13 @@ public class Ob1G5StateMachine {
     private static final long MAX_BACKFILL_PERIOD_MS = HOUR_IN_MS * 3; // how far back to request backfill data
     private static final long MAX_BACKFILL_PERIOD_MS2 = HOUR_IN_MS * 24; // A larger backfill option
     private static final int BACKFILL_CHECK_SMALL = 3;
+    private static final long ONE_PLUS_SLOW_GATT_MS = 1500;
+
+    private static class OnePlusSlowGattException extends RuntimeException {
+        OnePlusSlowGattException(final String operation, final long elapsed) {
+            super("ONE+ slow GATT " + operation + ": " + elapsed + "ms");
+        }
+    }
 
     private static final boolean getVersionDetails = true; // try to load firmware version details
     private static final boolean getBatteryDetails = true; // try to load battery info details
@@ -290,17 +298,77 @@ public class Ob1G5StateMachine {
             UserError.Log.e(TAG, "Got exception in plugin: " + e);
             e.printStackTrace();
         }
+        final long extraDataSetupStarted = tsl();
+
         connection.setupNotification(ExtraData)
                 .timeout(15, TimeUnit.SECONDS) // WARN
                 .doOnNext(notificationObservable -> {
-                    UserError.Log.d(TAG, "Extra data notifications enabled");
-                   val sresult = connection.setupIndication(Authentication)
+                    final long extraDataSetupTime = msSince(extraDataSetupStarted);
+
+                    UserError.Log.d(TAG,
+                                    "Extra data notifications enabled in "
+                                    + extraDataSetupTime + "ms");
+
+                    if(shortTxId() && extraDataSetupTime > ONE_PLUS_SLOW_GATT_MS) {
+                        throw new OnePlusSlowGattException(
+                                "ExtraData notification setup",
+                                extraDataSetupTime);
+                    }
+
+                    final long authenticationSetupStarted = tsl();
+
+                    val sresult = connection.setupIndication(Authentication)
                             .timeout(15, TimeUnit.SECONDS) // WARN
-                            .doOnNext(notificationObservable2 -> doNext(parent, connection))
+                            .doOnNext(notificationObservable2 -> {
+                                final long authenticationSetupTime =
+                                        msSince(authenticationSetupStarted);
+
+                                UserError.Log.d(TAG,
+                                                "Authentication indication enabled in "
+                                                + authenticationSetupTime + "ms");
+
+                                if(shortTxId()
+                                   && authenticationSetupTime > ONE_PLUS_SLOW_GATT_MS) {
+                                    throw new OnePlusSlowGattException(
+                                            "Authentication indication setup",
+                                            authenticationSetupTime);
+                                }
+
+                                doNext(parent, connection);
+                            })
                             .flatMap(notificationObservable2 -> notificationObservable2)
                             .subscribe(bytes -> {
                                 lastAuthenticationStream = tsl();
                                 UserError.Log.d(TAG, "Received Authentication 2 indication bytes: " + bytesToHex(bytes));
+
+                                // RGI check connection: if KEKS auth fails, act
+                                if(shortTxId()
+                                   && bytes.length == 3
+                                   && bytes[0] == 0x05
+                                   && bytes[1] == 0x02
+                                   && bytes[2] == 0x01) {
+
+                                    UserError.Log.e(TAG,
+                                                    "KEKS authentication rejected (050201) - clearing KEKS and Bluetooth bond");
+
+                                    parent.authResult(false);
+
+                                    parent.clearKeksForRetry();
+
+                                    // The transmitter is bonded but rejects our KEKS key.
+                                    // Remove the stale Android bond so the fresh KEKS exchange
+                                    // can establish a new bond.
+                                    parent.unBond();
+
+                                    parent.resetSomeInternalState();
+
+                                    // Give Android time to complete removeBond() and the
+                                    // transmitter time to terminate the existing connection.
+                                    parent.background_automata(10000);
+
+                                    return;
+                                }
+
                                 try {
                                     if (parent.plugin.bondNow(bytes)) {
                                         UserError.Log.d(TAG, "Creating bond!!");
@@ -375,6 +443,27 @@ public class Ob1G5StateMachine {
 
     private static void handleAuthenticationThrowable(final Throwable throwable, final Ob1G5CollectionService parent) {
         if (!(throwable instanceof OperationSuccess)) {
+            // RGI add this
+            if(shortTxId()
+               && throwable instanceof BleCannotSetCharacteristicNotificationException) {
+
+                UserError.Log.e(TAG,
+                                "ONE+: characteristic notification setup failed - "
+                                + "abandoning connection cleanly: "
+                                + throwable);
+
+                parent.recoverFromSlowGatt();
+                return;
+            }
+
+            if(throwable instanceof OnePlusSlowGattException) {
+                UserError.Log.e(TAG,
+                                throwable.getMessage()
+                                + " - abandoning connection");
+                parent.recoverFromSlowGatt();
+                return;
+            }
+
             if (((parent.getState() == Ob1G5CollectionService.STATE.CLOSED)
                     || (parent.getState() == Ob1G5CollectionService.STATE.CLOSE))
                     && (throwable instanceof BleDisconnectedException)) {
@@ -388,8 +477,10 @@ public class Ob1G5StateMachine {
             } else {
                 UserError.Log.d(TAG, "authentication notification  throwable: (" + parent.getState() + ") " + throwable + " " + JoH.dateTimeText(tsl()));
                 parent.incrementErrors();
-                if (throwable instanceof BleCannotSetCharacteristicNotificationException
-                        || throwable instanceof BleGattCharacteristicException) {
+
+                if(throwable instanceof BleCannotSetCharacteristicNotificationException
+                   || throwable instanceof BleGattCharacteristicException) {
+                    parent.setPreScanFailureMarker();
                     parent.tryGattRefresh();
                     parent.changeState(SCAN);
                 }
@@ -693,15 +784,26 @@ public class Ob1G5StateMachine {
         connection.getCharacteristic(Control)
                 .blockingGet().setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
 
-        connection.setupIndication(Control)
+        // RGI change to use setupNorification for One+
+        final Observable<Observable<byte[]>> controlStream =
+            shortTxId()
+            ? connection.setupNotification(Control)
+            : connection.setupIndication(Control);
 
+        //connection.setupIndication(Control)
+        controlStream
                 .doOnNext(notificationObservable -> {
 
                     if (d) UserError.Log.d(TAG, "Notifications enabled");
                     speakSlowly();
 
-                    connection.writeCharacteristic(Control, nn(use_g5_internal_alg ? (getEGlucose(parent) ? new EGlucoseTxMessage(shortTxId()).byteSequence : new GlucoseTxMessage().byteSequence) : new SensorTxMessage().byteSequence))
-                            .subscribe(
+                    connection.writeCharacteristic(Control,
+                                                   nn(use_g5_internal_alg ?
+                                                      (getEGlucose(parent) ?
+                                                       new EGlucoseTxMessage(shortTxId()).byteSequence :
+                                                       new GlucoseTxMessage().byteSequence) :
+                                                      new SensorTxMessage().byteSequence))
+                        .subscribe(
                                     characteristicValue -> {
                                         if (d)
                                             UserError.Log.d(TAG, "Wrote SensorTxMessage request");
@@ -964,7 +1066,9 @@ public class Ob1G5StateMachine {
                             break;
 
                         default:
-                            val hex = bytesToHex(bytes);
+                            // RGI fixed
+                            //val hex = bytesToHex(bytes);
+                            final String hex = bytesToHex(bytes);
                             UserError.Log.e(TAG, "Got unknown packet rx: " + hex);
 
                             switch (hex) {
@@ -980,6 +1084,8 @@ public class Ob1G5StateMachine {
                         inevitableDisconnect(parent, connection);
                     }
 
+                    /* RGI was */
+                    /*
                 }, throwable -> {
                     if (!(throwable instanceof OperationSuccess)) {
                         if (throwable instanceof BleDisconnectedException) {
@@ -991,8 +1097,49 @@ public class Ob1G5StateMachine {
                             disconnectNow(parent, connection);
                         }
 
-                    }
-                });
+                    } */
+
+                    }, throwable -> {
+                        if(!(throwable instanceof OperationSuccess)) {
+
+                            if(shortTxId()
+                               && throwable instanceof BleCannotSetCharacteristicNotificationException) {
+
+                                /* RGI comment */
+                                /*
+                                UserError.Log.e(TAG,
+                                                "ONE+ Control notification setup failed - forcing scan recovery: "
+                                                + throwable);
+
+                                parent.setPreScanFailureMarker();
+                                parent.tryGattRefresh();
+                                parent.changeState(Ob1G5CollectionService.STATE.SCAN);
+                                */
+                                /* instead recover */
+                                UserError.Log.e(TAG,
+                                                "ONE+ Control notification setup failed - "
+                                                + "abandoning connection cleanly: "
+                                                + throwable);
+
+                                parent.recoverFromSlowGatt();
+
+                            } else if(throwable instanceof BleDisconnectedException) {
+
+                                UserError.Log.d(TAG,
+                                                "Disconnected when waiting to receive indication: "
+                                                + throwable);
+
+                                parent.changeState(Ob1G5CollectionService.STATE.CLOSE);
+
+                            } else {
+
+                                UserError.Log.e(TAG,
+                                                "Error receiving indication: " + throwable);
+
+                                disconnectNow(parent, connection);
+                            }
+                        }
+                    });
 
 
         return true;
@@ -1080,8 +1227,35 @@ public class Ob1G5StateMachine {
             return;
         }
 
-        final int check_readings = nextBackFillCheckSize;
-        UserError.Log.d(TAG, "Checking " + check_readings + " for backfill requirement");
+        /* RGI remove this
+          final int check_readings = nextBackFillCheckSize;
+          UserError.Log.d(TAG, "Checking " + check_readings + " for backfill requirement");
+        */
+        // RGI replace with this
+
+        final long txStartTime =
+            DexTimeKeeper.getTxStartTimestamp(getTransmitterID());
+
+        final long effectiveStartTime =
+            txStartTime > 0
+            ? Math.max(sensor.started_at, txStartTime)
+            : sensor.started_at;
+
+        final int availableReadings =
+            Math.max(1,
+                     (int)((tsl() - effectiveStartTime) / DEXCOM_PERIOD) + 1);
+
+        final int check_readings =
+            Math.min(nextBackFillCheckSize, availableReadings);
+
+        UserError.Log.d(TAG,
+                        "Checking " + check_readings
+                        + " for backfill requirement"
+                        + " (requested " + nextBackFillCheckSize
+                        + ", available " + availableReadings + ")");
+
+        /* RGI end replace */
+        
         final List<BgReading> lastReadings = BgReading.latest_by_size(check_readings);
         boolean ask_for_backfill = false;
         long earliest_timestamp = tsl() - maxBackfillPeriod_MS();
@@ -1113,7 +1287,10 @@ public class Ob1G5StateMachine {
             nextBackFillCheckSize = backfillCheckLarge();
             monitorBackFill(parent, connection);
 
-            final long txStartTime = DexTimeKeeper.getTxStartTimestamp(getTransmitterID()); // the time the transmitter reports as starting or 0 if we don't know
+            // RGI txStartTime is declared above
+            //final long txStartTime = DexTimeKeeper.getTxStartTimestamp(getTransmitterID()); // the time the transmitter reports as starting or 0 if we don't know
+
+            
             final long startTime = Math.max(earliest_timestamp - DEXCOM_PERIOD, Math.max(txStartTime + DEXCOM_PERIOD, sensor.started_at));
             final long endTime = latest_timestamp + DEXCOM_PERIOD;
 

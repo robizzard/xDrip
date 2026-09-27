@@ -513,7 +513,8 @@ public class Ob1G5CollectionService extends G5BaseService {
                 UserError.Log.d(TAG, "Scanning for: " + getTransmitterBluetoothName());
             } else {
                 UserError.Log.d(TAG, "Transmitter mac already known: " + transmitterMAC);
-                changeState(CONNECT);
+                // RGI
+                changeState(CONNECT_NOW); // was CONNECT
 
             }
         } else {

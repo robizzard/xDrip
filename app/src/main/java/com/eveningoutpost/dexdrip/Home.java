@@ -1007,7 +1007,7 @@ public class Home extends ActivityWithMenu implements ActivityCompat.OnRequestPe
                     Log.e(TAG, "Sensor not in warm up period when notification due to fire");
                     return;
                 }
-                final PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+                final PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 JoH.showNotification(bundle.getString(SHOW_NOTIFICATION), bundle.getString("notification_body"), pendingIntent, notification_id, true, true, true);
                 UserError.Log.uel(TAG, bundle.getString("notification_body"));
             } else if (bundle.getString(Home.BLUETOOTH_METER_CALIBRATION) != null) {
@@ -3786,7 +3786,7 @@ public class Home extends ActivityWithMenu implements ActivityCompat.OnRequestPe
     }
 
     public static PendingIntent getHomePendingIntent() {
-        return PendingIntent.getActivity(xdrip.getAppContext(), 0, new Intent(xdrip.getAppContext(), Home.class), android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+        return PendingIntent.getActivity(xdrip.getAppContext(), 0, new Intent(xdrip.getAppContext(), Home.class), android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
     }
 
    /* class SnackbarUriListener implements ActionClickListener {

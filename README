@@ -1,0 +1,121 @@
+############################################################
+
+
+>>> You probably just want to run build_and_run.sh <<<
+
+Remember to make a copy of "my_private_details.sh.example"
+and set the phone's serial (i.e. name) and watch address.
+
+
+
+Most changes are in:
+~/android/xDrip/app/src/main/java/com/eveningoutpost/dexdrip/services/Ob1G5CollectionService.java
+~/android/xDrip/app/src/main/java/com/eveningoutpost/dexdrip/g5model/Ob1G5StateMachine.java
+
+with FLAG_IMMUTABLE (for newer Android versions) changes in:
+~/android/xDrip/app/src/main/java/com/eveningoutpost/dexdrip/utilitymodels/Notifications.java
+
+############################################################
+
+Devices:
+
+Sony Xperia 1 VII at $PHONE_SERIAL ("adb devices" gives you this) 
+
+Galaxy watch 4 (SM-R880) is connected via Wifi debugging at $WATCH_ADDRESS.
+It's something like 192.168.0.x:y where x and y are integers.
+
+############################################################
+
+Tested on:
+
+Sony Xperia 1 VII : Android 16, software version 17.1.A.2.265
+Samsung Galaxy 4 watch (model SM-R880) : One UI 8.0 software version R880XXS2JZG3 SM-R880X2SAXAA
+
+Installation platform:
+Ubuntu Linux 24.04 running Android Debug Bridge version 1.0.41, Version 34.0.4-debian, Installed as /usr/lib/android-sdk/platform-tools/adb, Running on Linux 6.8.0-142-generic (x86_64)
+
+This was developed on a laptop bought on STFC grant ST/R000603/1.
+Yes, it's an old device, but thanks STFC - you're literally life savers!
+
+############################################################
+
+# build
+nice ./gradlew --no-daemon assembleProdDebug -PappName="$APP_NAME"
+
+# install
+adb -s "$PHONE_SERIAL" install -r app/build/outputs/apk/prod/debug/app-prod-debug.apk
+
+# enable (if disabled overnight)
+adb -s "$PHONE_SERIAL" shell pm enable com.eveningoutpost.dexdrip.debug
+
+# stop all
+adb -s "$PHONE_SERIAL" shell am force-stop com.eveningoutpost.dexdrip
+adb -s "$PHONE_SERIAL" shell am force-stop tk.glucodata
+adb -s "$PHONE_SERIAL" shell am force-stop com.eveningoutpost.dexdrip.debug
+
+# clean logs
+adb -s "$PHONE_SERIAL" logcat -c
+
+# start debug xdrip
+adb -s "$PHONE_SERIAL" shell monkey -p com.eveningoutpost.dexdrip.debug 1
+
+# obtain a useful debug, continuously
+adb -s "$PHONE_SERIAL" logcat -v time | tee xdrip-direct-connect-test.log
+
+
+############################################################
+
+# restart bluetooth
+adb -s "$PHONE_SERIAL" shell svc bluetooth disable
+sleep 3
+adb -s "$PHONE_SERIAL" shell svc bluetooth enable
+
+############################################################
+
+# filtered log
+adb -s "$PHONE_SERIAL" logcat -v time | grep --line-buffered -E 'Ob1G5CollectionService|Ob1G5StateMachine|KEKS-Plugin|Connecting with auto|Got scan result|Full success|Could not authenticate|Got glucose|Bond|Pair'|grep -v FastPair
+
+############################################################
+
+# disable debug build
+adb -s "$PHONE_SERIAL" shell pm disable-user --user 0 com.eveningoutpost.dexdrip.debug
+
+# start juggluco and normal xdrip
+adb -s "$PHONE_SERIAL" shell monkey -p tk.glucodata 1
+adb -s "$PHONE_SERIAL" shell monkey -p com.eveningoutpost.dexdrip 1
+
+############################################################
+
+# build wear apk
+nice ./gradlew --no-daemon :wear:assembleProdDebug -PappName="$APP_NAME"
+
+# install wear apk
+adb -s "$WATCH_ADDRESS" install -r wear/build/outputs/apk/prod/debug/wear-prod-debug.apk
+
+# watch wear log
+adb -s "$WATCH_ADDRESS" logcat | grep -iE 'dexdrip|wear|message|dataitem'
+
+############################################################
+
+Disclaimer
+----------
+
+This software is an experimental modification of xDrip+ and is provided for testing, research and personal use only.
+
+It is not a medical device, has not been clinically validated or certified for medical use and must not be relied upon for diagnosis, treatment, insulin dosing or any other medical decision. Glucose values, alerts, predictions, communications with sensors and transmitters and all other outputs may be delayed, incomplete, inaccurate or unavailable.
+
+Users are solely responsible for verifying any information produced by this software using an appropriate approved medical device and for following the advice of their healthcare professionals and the instructions supplied with their medical equipment.
+
+The software may contain defects and may cause loss or corruption of data, missed or incorrect readings, missed or incorrect alerts, Bluetooth or device connectivity problems, excessive battery consumption or other unexpected behaviour.
+
+This software is supplied "as is" and "as available", without warranties or representations of any kind, whether express or implied, including but not limited to warranties of accuracy, reliability, fitness for a particular purpose, merchantability, availability or non-infringement.
+
+To the fullest extent permitted by applicable law, the authors, contributors and distributors shall not be liable for any direct, indirect, incidental, consequential, special, exemplary or other loss, damage, injury or expense arising from the use of, inability to use or reliance upon this software, including any loss or injury resulting from incorrect, delayed or missing glucose readings or alerts.
+
+Use of this software is entirely at the user's own risk. Users are responsible for ensuring that their use complies with all applicable laws, regulations, device warranties and medical guidance.
+
+This modified software is not affiliated with, endorsed by or supported by Dexcom, Google, Samsung, Sony or any other device or service manufacturer unless explicitly stated otherwise.
+
+Nothing in this disclaimer excludes or limits liability where such exclusion or limitation is prohibited by applicable law.
+
+The Dexcom ONE+ Bluetooth changes in this modified version are experimental and have been tested only with the specific phone, Android version and transmitter setup used by the author; their behaviour on other devices, Android versions or configurations has not been validated. Use at your own risk.

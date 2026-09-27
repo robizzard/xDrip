@@ -58,3 +58,6 @@ patches/
 *.exe
 *.iml
 .claude/
+
+# my private details script
+my_private_details.sh

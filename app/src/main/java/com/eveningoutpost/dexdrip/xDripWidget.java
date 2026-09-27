@@ -53,7 +53,16 @@ public class xDripWidget extends AppWidgetProvider {
 
         //Add behaviour: open xDrip on click
         Intent intent = new Intent(context, Home.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(context, 0, intent, 0);
+
+        // RGI fix this
+        //PendingIntent pendingIntent = PendingIntent.getActivity(context, 0, intent, 0);
+        PendingIntent pendingIntent =
+        PendingIntent.getActivity(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_IMMUTABLE);
+        
         views.setOnClickPendingIntent(R.id.xDripwidget, pendingIntent);
         displayCurrentInfo(appWidgetManager, appWidgetId, context, views);
         try {

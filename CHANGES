@@ -1,0 +1,354 @@
+xDripX changes
+==============
+
+Scope
+-----
+
+This file describes the changes in the supplied diff relative to:
+
+    baseline: 9898cb8e08b3a06226e62e35b75849891074c830
+    HEAD:     c71f9715498e4103e31cf9ce617be41f28a7b672
+
+It describes functional changes rather than reproducing the patch line by line.
+
+1. Separate xDripX debug build
+-----------------------------
+
+Files:
+    app/build.gradle
+    app/src/main/AndroidManifest.xml
+    app/src/debug/google-services.json
+    wear/build.gradle
+    build_and_run.sh
+
+The development build is now deliberately distinct from the normal xDrip+
+installation.
+
+- The phone debug build gets the application-ID suffix ".debug", allowing it
+  to coexist with the normal com.eveningoutpost.dexdrip installation.
+- The displayed application name is controlled by the Gradle project property
+  "appName", with "xDrip+" as the fallback.
+
+  Why? To allow both apps to run on the same device (i.e. phone) and be
+  clearly distinct.
+  
+- build_and_run.sh sets APP_NAME="xDripX" and passes it to the phone build.
+
+- app_name, app_name_launcher and the Android application label derive from
+  this build-time name rather than being permanently hard-coded.
+
+- The Wear module uses the same appName property for its application,
+  complication and settings labels, including names such as:
+      xDripX
+      xDripX(Large)
+      xDripX(BigChart)
+      xDripX(Circle)
+      xDripX Prefs.
+      xDripX Settings
+      
+- The Wear debug build also receives the ".debug" application-ID suffix.
+
+- A debug google-services.json has been added for
+  com.eveningoutpost.dexdrip.debug.
+  
+- Minification and resource shrinking are disabled for the phone debug build,
+  making the test build easier to debug.
+
+2. Newer Android compatibility
+------------------------------
+
+Files:
+    app/build.gradle
+    app/src/main/AndroidManifest.xml
+    app/src/main/java/com/eveningoutpost/dexdrip/GcmListenerSvc.java
+    app/src/main/java/com/eveningoutpost/dexdrip/Home.java
+    app/src/main/java/com/eveningoutpost/dexdrip/MegaStatus.java
+    app/src/main/java/com/eveningoutpost/dexdrip/Reminders.java
+    app/src/main/java/com/eveningoutpost/dexdrip/cloud/backup/BackupActivity.java
+    app/src/main/java/com/eveningoutpost/dexdrip/models/JoH.java
+    app/src/main/java/com/eveningoutpost/dexdrip/services/ActivityRecognizedService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/services/DailyIntentService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/services/DexShareCollectionService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/services/G5CollectionService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/services/MissedReadingService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/services/Ob1G5CollectionService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/services/SyncService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/utilitymodels/AlertPlayer.java
+    app/src/main/java/com/eveningoutpost/dexdrip/utilitymodels/CollectionServiceStarter.java
+    app/src/main/java/com/eveningoutpost/dexdrip/utilitymodels/Notifications.java
+    app/src/main/java/com/eveningoutpost/dexdrip/utils/CheckBridgeBattery.java
+    app/src/main/java/com/eveningoutpost/dexdrip/utils/framework/WakeLockTrampoline.java
+    app/src/main/java/com/eveningoutpost/dexdrip/wearintegration/WatchUpdaterService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/xDripWidget.java
+    app/src/main/java/com/eveningoutpost/dexdrip/xDripWidgetExtended.java
+
+The phone build has been updated for newer Android behaviour, particularly the
+Android 12+ Bluetooth, component-export and PendingIntent rules encountered on
+the Android 16 test phone.
+
+- targetSdkVersion is increased from 26 to 32.
+- RxAndroidBle is updated from 1.12.1 to 1.19.1.
+- Legacy BLUETOOTH and BLUETOOTH_ADMIN permissions are retained only through
+  API 30.
+- BLUETOOTH_SCAN and BLUETOOTH_CONNECT are declared explicitly.
+- BLUETOOTH_SCAN is marked neverForLocation.
+- Components with intent filters that must be externally reachable now have
+  explicit android:exported declarations. This includes the launcher activity,
+  widget receivers and a number of system/integration receivers and services.
+- PendingIntents throughout the application are explicitly marked immutable
+  where appropriate. This includes notifications, scheduled services,
+  broadcasts and widget click actions.
+- The xDrip widgets therefore use explicit immutable click PendingIntents and
+  explicitly exported widget receivers under the newer Android rules.
+
+3. Dexcom ONE+ / short-transmitter BLE connection strategy
+----------------------------------------------------------
+
+Files:
+    app/src/main/java/com/eveningoutpost/dexdrip/services/Ob1G5CollectionService.java
+    app/src/main/java/com/eveningoutpost/dexdrip/g5model/Ob1G5StateMachine.java
+    wear/src/main/java/com/eveningoutpost/dexdrip/services/Ob1G5CollectionService.java
+
+The largest behavioural change is a separate, more conservative BLE path for
+short transmitter IDs, logged in the code as ONE+.
+
+3.1 Always scan for ONE+
+
+The normal "minimise scanning" direct-connect optimisation is disabled for
+short transmitter IDs.
+
+- ONE+ performs a real BLE scan rather than relying on a previously saved MAC
+  address and direct reconnect.
+- The general minimise-scanning strategy now also requires a locally bonded
+  device and rejects the direct-connect path after a pre-scan failure.
+- A saved transmitter MAC is still used where appropriate for other
+  transmitters.
+- When a MAC is already known, the phone now enters CONNECT_NOW rather than
+  CONNECT.
+- The Wear collector has the same CONNECT -> CONNECT_NOW change. This has
+  not been tested: my test setup has the watch simply mirroring the phone's
+  readings.
+
+The intention is to avoid repeated bad direct connections on the newer phone
+Bluetooth stack.
+
+3.2 Detect and abandon slow GATT setup
+
+For ONE+, setup of the ExtraData notification and Authentication indication is
+timed.
+
+- A setup taking more than 1500 ms is treated as a slow GATT connection.
+- A BleCannotSetCharacteristicNotificationException during these setup stages
+  is also treated as a connection that should be abandoned.
+- Rather than continuing on a connection that is already behaving badly,
+  xDripX closes/disposes the connection, marks the failure as requiring a real
+  scan and starts a new scan after the subscriptions have unwound.
+- recoverFromSlowGatt() keeps the state at CLOSE while teardown occurs and
+  moves back to SCAN after a one-second delay.
+
+This is intended to recover quickly from the characteristic-setup stalls seen
+with ONE+ instead of allowing the session to fail later during authentication
+or data transfer.
+
+3.3 ONE+ authentication/KEKS recovery
+
+Authentication handling now recognises the three-byte response 05 02 01 as a
+rejected KEKS authentication.
+
+When this happens, xDripX:
+
+- marks authentication as failed
+- clears both persisted and live KEKS state
+- discards the current KEKS plugin instance
+- removes the stale Android Bluetooth bond
+- resets collector state
+- waits before retrying so Android and the transmitter can finish tearing down
+  the old bond/connection
+
+This allows a fresh KEKS exchange and bond to be established rather than
+repeatedly retrying an invalid saved key/bond combination.
+
+3.4 Notification rather than indication for the ONE+ control channel
+
+For short transmitter IDs, the Control characteristic is set up with
+setupNotification() rather than setupIndication().
+
+Other transmitter types retain the existing indication path.
+
+Control-channel notification setup failures on ONE+ use the same clean
+slow-GATT recovery path rather than forcing work to continue on the failed
+connection.
+
+3.5 Prefer a high-priority BLE connection
+
+After a ONE+ connection is established, xDripX asks Android for
+BluetoothGatt.CONNECTION_PRIORITY_HIGH.
+
+Failure to obtain high priority is logged but does not itself abort the
+connection.
+
+3.6 Protect the state machine from stale asynchronous callbacks
+
+Several guards have been added to prevent late callbacks from an old BLE
+operation from changing the state of a newer connection attempt.
+
+- Scan results are ignored unless the collector is still in SCAN.
+- Service-discovery results are ignored unless the collector is still in
+  DISCOVER.
+- A scheduled service wake-up is ignored for ONE+ when a recently connected
+  session is already actively progressing through discovery, authentication,
+  bonding/unbonding or data collection.
+
+These changes reduce races between asynchronous BLE callbacks and the collector
+state machine.
+
+3.7 Force a real scan after characteristic setup failures
+
+A preScanFailureMarker is set when relevant characteristic
+notification/indication setup fails.
+
+That marker prevents the minimise-scanning/direct-connect path on the next
+attempt, forcing a fresh scan instead.
+
+3.8 Safer saved transmitter MAC handling
+
+saveTransmitterMac() now refuses to persist a MAC address unless both the
+transmitter ID and MAC are present and the MAC has the expected 17-character
+form.
+
+This prevents a failed or partial scan from poisoning the saved direct-connect
+state.
+
+4. Backfill handling
+--------------------
+
+File:
+    app/src/main/java/com/eveningoutpost/dexdrip/g5model/Ob1G5StateMachine.java
+
+The backfill check no longer blindly asks for the configured number of recent
+readings when the sensor/transmitter has not existed for that long.
+
+- The effective start time is calculated from the sensor start and known
+  transmitter start.
+- The number of readings that can actually exist since that time is calculated.
+- The backfill check size is capped to that available number.
+- Logging reports the requested and available check sizes.
+
+This avoids asking the database/backfill logic to examine more history than can
+exist for a newly started sensor/transmitter.
+
+5. Collector diagnostics
+------------------------
+
+File:
+    app/src/main/java/com/eveningoutpost/dexdrip/services/Ob1G5CollectionService.java
+
+The collector status now permanently shows "Last Data Received" rather than
+only showing the old native-algorithm item for a short period.
+
+The status includes:
+
+- the time of the last usable glucose packet
+- how long ago it was received
+- GOOD highlighting below 7 minutes
+- NOTICE highlighting from 7 to 15 minutes
+- BAD highlighting after 15 minutes
+
+Connection-failure logging has also been expanded to show both normal-connect
+and CONNECT_NOW failure metrics.
+
+Additional recovery/debug helpers expose the current error count, clear KEKS
+state for retry and provide a rate-limited Bluetooth-restart helper.
+
+6. Wear OS changes
+------------------
+
+Files:
+    wear/build.gradle
+    wear/src/main/java/com/eveningoutpost/dexdrip/services/Ob1G5CollectionService.java
+
+- Wear targetSdkVersion is increased from 23 to 24 for the Galaxy Watch 4
+  test environment.
+- The Wear debug application gets the ".debug" application-ID suffix.
+- Wear labels follow the same build-time appName property as the phone build.
+- When the Wear collector already knows the transmitter MAC it uses
+  CONNECT_NOW rather than CONNECT. This has not been tested: my test setup has
+  the watch simply mirroring the phone's readings.
+
+
+
+
+7. Local build, install and debugging workflow
+----------------------------------------------
+
+Files:
+    build_and_run.sh
+    my_private_details.sh.example
+    .gitignore
+    README
+
+A reproducible local test workflow has been added.
+
+build_and_run.sh:
+
+- finds the repository relative to the script itself
+- reads device-specific details from my_private_details.sh
+- keeps phone and watch adb targets together as arrays
+- builds the phone and Wear APKs
+- installs the test APKs
+- enables the phone debug package
+- stops normal xDrip, Juggluco and xDripX before testing
+- clears logcat
+- launches the xDripX debug package
+- displays a filtered BLE/authentication log suitable for testing the ONE+
+  connection path
+
+my_private_details.sh.example contains placeholders for:
+
+- PHONE_SERIAL
+- WATCH_ADDRESS
+
+Note: 
+The Wear APK is installed automatically if the configured watch is reachable
+and available through ADB; otherwise watch installation is skipped.
+
+The real my_private_details.sh is excluded by .gitignore.
+
+README documents the phone/watch test setup, build/install commands, Bluetooth
+restart commands and useful filtered logcat command.
+
+8. Test devices documented
+---------------------------
+
+The new README records the environment used for this work:
+
+- Sony Xperia 1 VII running Android 16
+- Samsung Galaxy Watch 4 connected using Wi-Fi ADB debugging
+
+Tested on Ubuntu Linux 24.04 running Android Debug Bridge version 1.0.41, Version 34.0.4-debian, Installed as /usr/lib/android-sdk/platform-tools/adb, Running on Linux 6.8.0-142-generic (x86_64)
+
+This was developed on a laptop bought on STFC grant ST/R000603/1.
+Yes, it's an old device, but thanks STFC - you're literally life savers!
+
+9. Disclaimer
+-------------
+
+This software is an experimental modification of xDrip+ and is provided for testing, research and personal use only.
+
+It is not a medical device, has not been clinically validated or certified for medical use and must not be relied upon for diagnosis, treatment, insulin dosing or any other medical decision. Glucose values, alerts, predictions, communications with sensors and transmitters and all other outputs may be delayed, incomplete, inaccurate or unavailable.
+
+Users are solely responsible for verifying any information produced by this software using an appropriate approved medical device and for following the advice of their healthcare professionals and the instructions supplied with their medical equipment.
+
+The software may contain defects and may cause loss or corruption of data, missed or incorrect readings, missed or incorrect alerts, Bluetooth or device connectivity problems, excessive battery consumption or other unexpected behaviour.
+
+This software is supplied "as is" and "as available", without warranties or representations of any kind, whether express or implied, including but not limited to warranties of accuracy, reliability, fitness for a particular purpose, merchantability, availability or non-infringement.
+
+To the fullest extent permitted by applicable law, the authors, contributors and distributors shall not be liable for any direct, indirect, incidental, consequential, special, exemplary or other loss, damage, injury or expense arising from the use of, inability to use or reliance upon this software, including any loss or injury resulting from incorrect, delayed or missing glucose readings or alerts.
+
+Use of this software is entirely at the user's own risk. Users are responsible for ensuring that their use complies with all applicable laws, regulations, device warranties and medical guidance.
+
+This modified software is not affiliated with, endorsed by or supported by Dexcom, Google, Samsung, Sony or any other device or service manufacturer unless explicitly stated otherwise.
+
+Nothing in this disclaimer excludes or limits liability where such exclusion or limitation is prohibited by applicable law.
+
+The Dexcom ONE+ Bluetooth changes in this modified version are experimental and have been tested only with the specific phone, Android version and transmitter setup used by the author; their behaviour on other devices, Android versions or configurations has not been validated. Use at your own risk.
