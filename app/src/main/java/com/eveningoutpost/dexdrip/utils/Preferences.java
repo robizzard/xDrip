@@ -1175,6 +1175,24 @@ public class Preferences extends BasePreferenceActivity implements SearchPrefere
             addPreferencesFromResource(R.xml.pref_advanced_settings);
             addPreferencesFromResource(R.xml.xdrip_plus_prefs);
 
+            // RGI
+            final Preference numberIconTest =
+                findPreference("do_number_icon_test");
+
+            if(numberIconTest != null)
+            {
+                numberIconTest.setOnPreferenceClickListener(preference ->
+                                                            {
+                                                                final Intent intent =
+                                                                    new Intent(getActivity(), Home.class);
+
+                                                                intent.putExtra("numberIconTest", "numberIconTest");
+                                                                startActivity(intent);
+
+                                                                return true;
+                                                            });
+            }
+            
             bindPreferenceSummaryToValue(findPreference("persistent_high_threshold_mins"));
             bindPreferenceSummaryToValue(findPreference("persistent_high_repeat_mins"));
 

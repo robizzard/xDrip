@@ -3,29 +3,7 @@
 # stop on error
 set -eou pipefail
 
-# find my_private_details.sh relative to this script
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PRIVATE_DETAILS="$SCRIPT_DIR/my_private_details.sh"
-cd "$SCRIPT_DIR"
-
-if [[ ! -r "$PRIVATE_DETAILS" ]]
-then
-    echo "Missing $PRIVATE_DETAILS"
-    echo "Copy my_private_details.sh.example to my_private_details.sh and edit it."
-    exit 1
-fi
-
-source "$PRIVATE_DETAILS"
-
-adb_phone()
-{
-    adb -s "$PHONE_SERIAL" "$@"
-}
-
-adb_watch()
-{
-    adb -s "$WATCH_ADDRESS" "$@"
-}
+source adb_settings.sh
 
 # I call the app "xDripX" rather than "xDrip+"
 # so I can run both on the phone and so it's
@@ -68,8 +46,6 @@ adb_phone shell am force-stop tk.glucodata
 # stop our new xdripx as well
 adb_phone shell am force-stop com.eveningoutpost.dexdrip.debug
 
-# clean logs
-adb_phone logcat -c
 
 # start debug xdrip
 # monkey works, but causes autorotate to switch on (annoying!)
@@ -81,16 +57,10 @@ adb_phone shell am start \
     -c android.intent.category.LAUNCHER \
     -n com.eveningoutpost.dexdrip.debug/com.eveningoutpost.dexdrip.Home
 
-
-# obtain a useful debug, continuously, but this is a
-# lot of output...
-#adb_phone logcat -v time | tee xdrip-direct-connect-test.log
-
-# so filter some of the data
-adb_phone logcat -b all -v time | \
-    tee oneplus-bluetooth-full.log | \
-    grep --line-buffered -E \
-    'Ob1G5CollectionService|Ob1G5StateMachine|KEKS-Plugin|BluetoothGatt|onConnectionUpdated|Connecting with auto|Got scan result|Full success|Could not authenticate|Got glucose|Bond|Pair' | \
-    grep --line-buffered -v FastPair | \
-    grep --line-buffered -v getBondedDevices | \
-    grep --line-buffered -v Checking
+# logging
+LOGFILE=oneplus-bluetooth-full.log \
+    ./logging.sh \
+    'Ob1G5CollectionService|Ob1G5StateMachine|KEKS-Plugin|BluetoothGatt|onConnectionUpdated|Connecting with auto|Got scan result|Full success|Could not authenticate|Got glucose|Bond|Pair' \
+    '!Fastpair' \
+    '!getBondedDevices' \
+    '!Checking'

@@ -717,19 +717,10 @@
             <PreferenceScreen
                 android:key="xdrip_plus_number_icon"
                 android:title="@string/title_xdrip_plus_number_icon">
-                <Preference
-                    android:key="do_number_icon_test"
-                    android:summary="@string/summary_do_number_icon_test"
-                    android:title="@string/title_do_number_icon_test">
-                    <intent
-                        android:action="android.intent.action.MAIN"
-                        android:targetClass="com.eveningoutpost.dexdrip.Home"
-                        android:targetPackage="@string/local_target_package">
-                        <extra
-                            android:name="numberIconTest"
-                            android:value="numberIconTest" />
-                    </intent>
-                </Preference>
+              <Preference
+                  android:key="do_number_icon_test"
+                  android:summary="@string/summary_do_number_icon_test"
+                  android:title="@string/title_do_number_icon_test" />
                 <SwitchPreference
                     android:defaultValue="false"
                     android:key="number_icon_tested"
