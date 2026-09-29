@@ -80,8 +80,8 @@ adb -s "$PHONE_SERIAL" shell svc bluetooth enable
 
 ############################################################
 
-# filtered log
-adb -s "$PHONE_SERIAL" logcat -v time | grep --line-buffered -E 'Ob1G5CollectionService|Ob1G5StateMachine|KEKS-Plugin|Connecting with auto|Got scan result|Full success|Could not authenticate|Got glucose|Bond|Pair'|grep -v FastPair
+# filtered log of phone events
+adb -s "$PHONE_SERIAL" logcat -v time | grep --line-buffered -E 'Ob1G5CollectionService|Ob1G5StateMachine|KEKS-Plugin|Connecting with auto|Got scan result|Full success|Could not authenticate|Got glucose|Bond|Pair'|grep --line-buffered -v FastPair|grep --line-buffered -v getBondedDevices
 
 ############################################################
 

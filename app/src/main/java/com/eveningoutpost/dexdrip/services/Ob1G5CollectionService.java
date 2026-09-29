@@ -167,7 +167,9 @@ import lombok.val;
  */
 
 
-public class Ob1G5CollectionService extends G5BaseService {
+public class Ob1G5CollectionService extends G5BaseService
+{
+
 
     public static final String TAG = Ob1G5CollectionService.class.getSimpleName();
     public static final String OB1G5_PREFS = "use_ob1_g5_collector_service";
@@ -179,6 +181,7 @@ public class Ob1G5CollectionService extends G5BaseService {
     private static final String STOP_SCAN_TASK_ID = "ob1-g5-scan-timeout_scan";
     private static final String KEKS = "keks";
     private static final String KEKS_ONE = "keks1_";
+    private static final String LAST_USABLE_GLUCOSE_PACKET_TIME = "ob1-last-usable-glucose-packet-time-";
     private static volatile STATE state = INIT;
     private static volatile STATE last_automata_state = CLOSED;
 
@@ -1087,11 +1090,15 @@ public class Ob1G5CollectionService extends G5BaseService {
         return transmitterID;
     }
 
-    private void handleWakeup() {
-        if (always_scan) {
+    private void handleWakeup()
+    {
+        if (always_scan)
+        {
             UserError.Log.d(TAG, "Always scan mode");
             changeState(SCAN);
-        } else {
+        }
+        else
+        {
             if (connectFailures > 0 || (!use_auto_connect && connectNowFailures > 0)) {
                 always_scan = true;
                 //UserError.Log.e(TAG, "Switching to scan always mode due to connect failures metric: " + connectFailures);
@@ -1101,12 +1108,16 @@ public class Ob1G5CollectionService extends G5BaseService {
                                 "Switching to scan always mode due to connect failure metrics:"
                                 + " connect=" + connectFailures
                                 + " connectNow=" + connectNowFailures);
-                
+
                 changeState(SCAN);
-            } else if (use_auto_connect && (connectNowFailures > 1) && (connectFailures < 0)) {
+            }
+            else if (use_auto_connect && (connectNowFailures > 1) && (connectFailures < 0))
+            {
                 UserError.Log.d(TAG, "Avoiding power connect due to failure metric: " + connectNowFailures + " " + connectFailures);
                 changeState(CONNECT);
-            } else {
+            }
+            else
+            {
                 changeState(CONNECT_NOW);
             }
         }
@@ -1781,9 +1792,23 @@ public class Ob1G5CollectionService extends G5BaseService {
             if (connection_linger != null) JoH.releaseWakeLock(connection_linger);
             connection = this_connection;
 
-            // RGI add this block
-            if(shortTxId()) {
-                UserError.Log.d(TAG, "ONE+: requesting high connection priority");
+            if(state == CONNECT_NOW)
+            {
+                connectNowFailures = -3; // mark good
+            }
+
+            if(state == CONNECT)
+            {
+                connectFailures = -1; // mark good
+            }
+
+            scanTimeouts = 0;
+            clearRetries();
+
+            if(shortTxId())
+            {
+                UserError.Log.d(TAG,
+                                "ONE+: requesting initial high connection priority");
 
                 this_connection.requestConnectionPriority(
                     BluetoothGatt.CONNECTION_PRIORITY_HIGH,
@@ -1791,23 +1816,16 @@ public class Ob1G5CollectionService extends G5BaseService {
                     TimeUnit.MILLISECONDS)
                     .subscribe(
                         () -> UserError.Log.d(TAG,
-                                              "ONE+: high connection priority requested"),
+                                              "ONE+: initial high connection priority requested"),
                         throwable -> UserError.Log.d(TAG,
-                                                     "ONE+: connection priority request failed: "
+                                                     "ONE+: initial connection priority request failed: "
                                                      + throwable));
+
             }
 
-            if (state == CONNECT_NOW) {
-                connectNowFailures = -3; // mark good
-            }
-            if (state == CONNECT) {
-                connectFailures = -1; // mark good
-            }
 
-            scanTimeouts = 0; // reset counter
-            clearRetries();
-
-            if (JoH.ratelimit("g5-to-discover", 1)) {
+            if (JoH.ratelimit("g5-to-discover", 1))
+            {
                 changeState(DISCOVER);
             }
         } else {
@@ -1819,31 +1837,31 @@ public class Ob1G5CollectionService extends G5BaseService {
     private synchronized void onConnectionStateChange(RxBleConnection.RxBleConnectionState newState) {
         String connection_state = "Unknown";
         switch (newState) {
-            case CONNECTING:
-                connection_state = "Connecting";
-                connecting_time = tsl();
-                break;
-            case CONNECTED:
-                connection_state = "Connected";
-                JoH.releaseWakeLock(floatingWakeLock);
-                floatingWakeLock = JoH.getWakeLock("floating-connected", 40000);
-                final long since_connecting = msSince(connecting_time);
-                if ((connecting_time > static_last_timestamp) && (since_connecting > Constants.SECOND_IN_MS * 310) && (since_connecting < Constants.SECOND_IN_MS * 620)) {
-                    if (!always_scan) {
-                        UserError.Log.e(TAG, "Connection time shows missed reading, switching to always scan, metric: " + niceTimeScalar(since_connecting));
-                        always_scan = true;
-                    } else {
-                        UserError.Log.e(TAG, "Connection time shows missed reading, despite always scan, metric: " + niceTimeScalar(since_connecting));
-                    }
+        case CONNECTING:
+            connection_state = "Connecting";
+            connecting_time = tsl();
+            break;
+        case CONNECTED:
+            connection_state = "Connected";
+            JoH.releaseWakeLock(floatingWakeLock);
+            floatingWakeLock = JoH.getWakeLock("floating-connected", 40000);
+            final long since_connecting = msSince(connecting_time);
+            if ((connecting_time > static_last_timestamp) && (since_connecting > Constants.SECOND_IN_MS * 310) && (since_connecting < Constants.SECOND_IN_MS * 620)) {
+                if (!always_scan) {
+                    UserError.Log.e(TAG, "Connection time shows missed reading, switching to always scan, metric: " + niceTimeScalar(since_connecting));
+                    always_scan = true;
+                } else {
+                    UserError.Log.e(TAG, "Connection time shows missed reading, despite always scan, metric: " + niceTimeScalar(since_connecting));
                 }
-                break;
-            case DISCONNECTING:
-                connection_state = "Disconnecting";
-                break;
-            case DISCONNECTED:
-                connection_state = "Disconnected";
-                JoH.releaseWakeLock(floatingWakeLock);
-                break;
+            }
+            break;
+        case DISCONNECTING:
+            connection_state = "Disconnecting";
+            break;
+        case DISCONNECTED:
+            connection_state = "Disconnected";
+            JoH.releaseWakeLock(floatingWakeLock);
+            break;
         }
         static_connection_state = connection_state;
         UserError.Log.d(TAG, "Bluetooth connection: " + static_connection_state);
@@ -1888,13 +1906,23 @@ public class Ob1G5CollectionService extends G5BaseService {
                 }
 
                 if (txIdMatch(getTransmitterID()) && service.getCharacteristic(ExtraData) != null) {
-                    try {
-                        plugin = Loader.getLocalInstance(Registry.get(KEKS), getTransmitterID());
-                        if (plugin == null) {
+                    try
+                    {
+                        plugin = Loader.getLocalInstance(Registry.get(KEKS),
+                                                         getTransmitterID());
+
+                        UserError.Log.d(TAG,
+                                        "ONE+: KEKS plugin instance="
+                                        + System.identityHashCode(plugin));
+
+                        if (plugin == null)
+                        {
                             val msg = "Unable to load keks plugin - please re-enter transmitter id";
                             UserError.Log.wtf(TAG, msg);
                             JoH.static_toast_long(msg);
-                        } else {
+                        }
+                        else
+                        {
                             plugin.setPersistence(2, PersistentStore.getBytes(KEKS_ONE + transmitterMAC));
                             if (immediateBonding())
                                 needsBonding(!isDeviceLocallyBonded() || ignoreBonding());
@@ -2498,6 +2526,8 @@ public class Ob1G5CollectionService extends G5BaseService {
 
         init_tx_id(); // needed if we have not passed through local INIT state
 
+        restoreLastUsableGlucosePacketTime();
+
         last_mega_status_read = JoH.tsl();
 
         final List<StatusItem> l = new ArrayList<>();
@@ -2572,6 +2602,72 @@ public class Ob1G5CollectionService extends G5BaseService {
               "Not yet...",
               NOTICE));
         }
+
+
+        // RGI Bluetooth/bond diagnostics
+        final boolean locallyBonded = isDeviceLocallyBonded();
+
+        l.add(new StatusItem(
+                  "Transmitter MAC",
+                  transmitterMAC != null ? transmitterMAC : "Not known",
+                  transmitterMAC != null ? NORMAL : NOTICE));
+
+        l.add(new StatusItem(
+                  "Transmitter Bonded",
+                  transmitterMAC == null
+                  ? "Unknown (no current MAC)"
+                  : locallyBonded
+                  ? "Bonded"
+                  : "NOT BONDED",
+                  transmitterMAC == null
+                  ? NOTICE
+                  : locallyBonded
+                  ? Highlight.GOOD
+                  : BAD));
+
+        try
+        {
+            final Set<RxBleDevice> bondedDevices = rxBleClient.getBondedDevices();
+            final StringBuilder dexcomDevices = new StringBuilder();
+
+            if(bondedDevices != null)
+            {
+                for(final RxBleDevice device : bondedDevices)
+                {
+                    final String mac = device.getMacAddress();
+                    final String name = device.getName();
+
+                    if((name != null && name.startsWith("DX"))
+                       || (transmitterMAC != null
+                           && mac != null
+                           && transmitterMAC.equalsIgnoreCase(mac)))
+                    {
+                        if(dexcomDevices.length() > 0)
+                            dexcomDevices.append("; ");
+
+                        dexcomDevices.append(name != null ? name : "<unnamed>")
+                            .append(" ")
+                            .append(mac != null ? mac : "<no MAC>");
+                    }
+                }
+            }
+
+            l.add(new StatusItem(
+                      "Android Bonded Dexcom",
+                      dexcomDevices.length() > 0
+                      ? dexcomDevices.toString()
+                      : "None",
+                      locallyBonded ? Highlight.GOOD : NOTICE));
+        }
+        catch(Exception e)
+        {
+            l.add(new StatusItem(
+                      "Android Bonded Dexcom",
+                      "Unable to read: " + e.getClass().getSimpleName(),
+                      NOTICE));
+        }
+
+        
 
         final int queueSize = Ob1G5StateMachine.queueSize();
         if (queueSize > 0) {
@@ -2885,4 +2981,32 @@ public class Ob1G5CollectionService extends G5BaseService {
             UserError.Log.e(TAG, "Got error when clearing data: " + e);
         }
     }
+
+
+    public static void setLastUsableGlucosePacketTime(final long timestamp)
+    {
+        lastUsableGlucosePacketTime = timestamp;
+
+        if(transmitterID != null)
+        {
+            PersistentStore.setLong(
+                LAST_USABLE_GLUCOSE_PACKET_TIME + transmitterID,
+                timestamp);
+        }
+    }
+
+    private static void restoreLastUsableGlucosePacketTime()
+    {
+        if(lastUsableGlucosePacketTime == 0
+           && transmitterID != null)
+        {
+            lastUsableGlucosePacketTime =
+                PersistentStore.getLong(
+                    LAST_USABLE_GLUCOSE_PACKET_TIME + transmitterID);
+        }
+    }
+
+
 }
+
+

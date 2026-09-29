@@ -119,8 +119,10 @@ public class Ob1G5StateMachine {
     private static final long MAX_BACKFILL_PERIOD_MS = HOUR_IN_MS * 3; // how far back to request backfill data
     private static final long MAX_BACKFILL_PERIOD_MS2 = HOUR_IN_MS * 24; // A larger backfill option
     private static final int BACKFILL_CHECK_SMALL = 3;
-    private static final long ONE_PLUS_SLOW_GATT_MS = 1500;
-
+    private static final long ONE_PLUS_SLOW_GATT_WARN_MS = 1500;
+    private static final int ONE_PLUS_FAST_INTERVAL_MAX_UNITS = 24;
+    private static final long ONE_PLUS_PARAMETER_UPDATE_TIMEOUT_MS = 3000;
+    
     private static class OnePlusSlowGattException extends RuntimeException {
         OnePlusSlowGattException(final String operation, final long elapsed) {
             super("ONE+ slow GATT " + operation + ": " + elapsed + "ms");
@@ -241,7 +243,8 @@ public class Ob1G5StateMachine {
                     // TODO wait for completion?
                     threadSleep(500);
                 }
-                if (cmd != null) {
+                if (cmd != null)
+                {
                     UserError.Log.d(TAG, "Sending auth command: " + HexDump.dumpHexString(cmd));
                     connection.getCharacteristic(Authentication)
                             .blockingGet().setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
@@ -309,105 +312,259 @@ public class Ob1G5StateMachine {
                                     "Extra data notifications enabled in "
                                     + extraDataSetupTime + "ms");
 
-                    if(shortTxId() && extraDataSetupTime > ONE_PLUS_SLOW_GATT_MS) {
-                        throw new OnePlusSlowGattException(
-                                "ExtraData notification setup",
-                                extraDataSetupTime);
-                    }
+                    final Runnable startAuthenticationIndication = () ->
+                        {
+                            final long authenticationSetupStarted = tsl();
 
-                    final long authenticationSetupStarted = tsl();
+                            connection.setupIndication(Authentication)
+                            .timeout(15, TimeUnit.SECONDS)
+                            .doOnNext(notificationObservable2 ->
+                                      {
+                                          final long authenticationSetupTime =
+                                              msSince(authenticationSetupStarted);
 
-                    val sresult = connection.setupIndication(Authentication)
-                            .timeout(15, TimeUnit.SECONDS) // WARN
-                            .doOnNext(notificationObservable2 -> {
-                                final long authenticationSetupTime =
-                                        msSince(authenticationSetupStarted);
+                                          UserError.Log.d(TAG,
+                                                          "Authentication indication enabled in "
+                                                          + authenticationSetupTime + "ms");
 
-                                UserError.Log.d(TAG,
-                                                "Authentication indication enabled in "
-                                                + authenticationSetupTime + "ms");
+                                          if(shortTxId()
+                                             && authenticationSetupTime > ONE_PLUS_SLOW_GATT_WARN_MS)
+                                          {
+                                              UserError.Log.w(TAG,
+                                                              "ONE+: slow GATT Authentication indication setup: "
+                                                              + authenticationSetupTime
+                                                              + "ms - setup succeeded, continuing");
+                                          }
 
-                                if(shortTxId()
-                                   && authenticationSetupTime > ONE_PLUS_SLOW_GATT_MS) {
-                                    throw new OnePlusSlowGattException(
-                                            "Authentication indication setup",
-                                            authenticationSetupTime);
-                                }
-
-                                doNext(parent, connection);
-                            })
+                                          doNext(parent, connection);
+                                      })
                             .flatMap(notificationObservable2 -> notificationObservable2)
-                            .subscribe(bytes -> {
-                                lastAuthenticationStream = tsl();
-                                UserError.Log.d(TAG, "Received Authentication 2 indication bytes: " + bytesToHex(bytes));
+                            .subscribe(bytes ->
+                                       {
+                                           lastAuthenticationStream = tsl();
 
-                                // RGI check connection: if KEKS auth fails, act
-                                if(shortTxId()
-                                   && bytes.length == 3
-                                   && bytes[0] == 0x05
-                                   && bytes[1] == 0x02
-                                   && bytes[2] == 0x01) {
+                                           UserError.Log.d(TAG,
+                                                           "Received Authentication 2 indication bytes: "
+                                                           + bytesToHex(bytes));
 
-                                    UserError.Log.e(TAG,
-                                                    "KEKS authentication rejected (050201) - clearing KEKS and Bluetooth bond");
+                                           if(shortTxId()
+                                              && bytes.length == 3
+                                              && bytes[0] == 0x05
+                                              && bytes[1] == 0x02
+                                              && bytes[2] == 0x01)
+                                           {
+                                               UserError.Log.e(TAG,
+                                                               "KEKS authentication rejected (050201) - "
+                                                               + "clearing KEKS and Bluetooth bond");
 
-                                    parent.authResult(false);
+                                               parent.authResult(false);
+                                               parent.clearKeksForRetry();
+                                               parent.unBond();
+                                               parent.resetSomeInternalState();
+                                               parent.background_automata(10000);
+                                               return;
+                                           }
 
-                                    parent.clearKeksForRetry();
+                                           try
+                                           {
+                                               if(parent.plugin.bondNow(bytes))
+                                               {
+                                                   UserError.Log.d(TAG, "Creating bond!!");
+                                                   parent.changeState(
+                                                       Ob1G5CollectionService.STATE.BOND);
+                                               }
 
-                                    // The transmitter is bonded but rejects our KEKS key.
-                                    // Remove the stale Android bond so the fresh KEKS exchange
-                                    // can establish a new bond.
-                                    parent.unBond();
+                                               if(parent.plugin.receivedResponse(bytes))
+                                               {
+                                                   doNext(parent, connection);
+                                               }
+                                           }
+                                           catch(Exception e)
+                                           {
+                                               UserError.Log.e(TAG,
+                                                               "Got exception in plugin: " + e);
 
-                                    parent.resetSomeInternalState();
+                                               parent.lastSensorStatus = e.getMessage();
 
-                                    // Give Android time to complete removeBond() and the
-                                    // transmitter time to terminate the existing connection.
-                                    parent.background_automata(10000);
+                                               if(e instanceof InvalidParameterException)
+                                               {
+                                                   parent.resetSomeInternalState();
+                                               }
+                                               else if(e instanceof SecurityException)
+                                               {
+                                                   parent.logFailure();
+                                                   parent.clearPersistStore();
+                                                   parent.changeState(SCAN);
+                                               }
+                                               else
+                                               {
+                                                   e.printStackTrace();
+                                               }
+                                           }
+                                       },
+                                       throwable ->
+                                       handleAuthenticationThrowable(throwable, parent));
+                        };
+                    if(shortTxId()
+                       && extraDataSetupTime > ONE_PLUS_SLOW_GATT_WARN_MS)
+                    {
+                        UserError.Log.w(TAG,
+                                        "ONE+: slow GATT ExtraData notification setup: "
+                                        + extraDataSetupTime
+                                        + "ms - requesting HIGH and waiting for actual connection interval");
 
-                                    return;
-                                }
+                        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                        {
+                            /*
+                             * Subscribe BEFORE requesting HIGH so that we cannot miss the
+                             * connection-parameter callback generated by the request.
+                             *
+                             * Connection interval is reported in units of 1.25 ms.
+                             */
+                            connection.observeConnectionParametersUpdates()
+                                .doOnNext(parameters ->
+                                          {
+                                              UserError.Log.d(TAG,
+                                                              "ONE+: connection parameters update: interval="
+                                                              + parameters.getConnectionInterval()
+                                                              + " ("
+                                                              + (parameters.getConnectionInterval() * 1.25)
+                                                              + "ms)"
+                                                              + " latency="
+                                                              + parameters.getSlaveLatency()
+                                                              + " timeout="
+                                                              + parameters.getSupervisionTimeout()
+                                                              + " ("
+                                                              + (parameters.getSupervisionTimeout() * 10)
+                                                              + "ms)");
+                                          })
+                                .filter(parameters ->
+                                        parameters.getConnectionInterval()
+                                        <= ONE_PLUS_FAST_INTERVAL_MAX_UNITS)
+                                .take(1)
+                                .timeout(ONE_PLUS_PARAMETER_UPDATE_TIMEOUT_MS,
+                                         TimeUnit.MILLISECONDS)
+                                .subscribe(
+                                    parameters ->
+                                    {
+                                        UserError.Log.d(TAG,
+                                                        "ONE+: fast connection interval confirmed: "
+                                                        + parameters.getConnectionInterval()
+                                                        + " ("
+                                                        + (parameters.getConnectionInterval() * 1.25)
+                                                        + "ms) - starting authentication");
 
-                                try {
-                                    if (parent.plugin.bondNow(bytes)) {
-                                        UserError.Log.d(TAG, "Creating bond!!");
-                                        parent.changeState(Ob1G5CollectionService.STATE.BOND);
-                                    }
-                                    if (parent.plugin.receivedResponse(bytes)) {
-                                        doNext(parent, connection);
-                                    }
-                                } catch (Exception e) {
-                                    UserError.Log.e(TAG, "Got exception in plugin: " + e);
-                                    parent.lastSensorStatus = e.getMessage();
-                                    if (e instanceof InvalidParameterException) {
-                                        parent.resetSomeInternalState();
-                                    } else if (e instanceof SecurityException) {
-                                        parent.logFailure();
-                                        parent.clearPersistStore();
-                                        parent.changeState(SCAN);
-                                    } else {
-                                        e.printStackTrace();
-                                    }
-                                }
-                            }, throwable -> handleAuthenticationThrowable(throwable, parent));
-                })
-                .flatMap(notificationObservable -> notificationObservable)
-                .subscribe(bytes -> {
-                    lastAuthenticationStream = tsl();
-                    UserError.Log.d(TAG, "Received extra data indication bytes: " + bytesToHex(bytes));
-                    try {
-                        if (parent.plugin.receivedData(bytes)) {
-                            doNext(parent, connection);
+                                        if(parent.getState()
+                                           == Ob1G5CollectionService.STATE.CHECK_AUTH)
+                                        {
+                                            startAuthenticationIndication.run();
+                                        }
+                                    },
+                                    throwable ->
+                                    {
+                                        abandonOnePlusSlowAuthentication(
+                                            parent,
+                                            "ONE+: no usable fast connection interval after HIGH request: "
+                                            + throwable);
+                                    });
+
+                            /*
+                             * requestConnectionPriority() completing does NOT prove that the
+                             * interval changed.  The observer above is what gates authentication.
+                             */
+                            connection.requestConnectionPriority(
+                                BluetoothGatt.CONNECTION_PRIORITY_HIGH,
+                                500,
+                                TimeUnit.MILLISECONDS)
+                                .subscribe(
+                                    () ->
+                                    UserError.Log.d(TAG,
+                                                    "ONE+: HIGH priority request submitted - "
+                                                    + "waiting for connection parameter update"),
+                                    throwable ->
+                                    abandonOnePlusSlowAuthentication(
+                                        parent,
+                                        "ONE+: HIGH priority request failed: "
+                                        + throwable));
                         }
-                    } catch (Exception e) {
-                        UserError.Log.e(TAG, "Got exception in plugin: " + e);
-                        e.printStackTrace();
+                        else
+                        {
+                            /*
+                             * observeConnectionParametersUpdates() requires API 26.
+                             * Preserve previous behaviour on older Android versions.
+                             */
+                            UserError.Log.w(TAG,
+                                            "ONE+: cannot observe connection parameters "
+                                            + "on Android < 8 - continuing authentication");
+
+                            startAuthenticationIndication.run();
+                        }
                     }
-                }, throwable -> handleAuthenticationThrowable(throwable, parent));
+                    else
+                    {
+                        startAuthenticationIndication.run();
+                    }
+                    })
+            .flatMap(notificationObservable -> notificationObservable)
+            .subscribe(bytes ->
+                       {
+                           lastAuthenticationStream = tsl();
+
+                           UserError.Log.d(TAG,
+                                           "Received extra data indication bytes: "
+                                           + bytesToHex(bytes));
+
+                           try
+                           {
+                               if(parent.plugin.receivedData(bytes))
+                               {
+                                   doNext(parent, connection);
+                               }
+                           }
+                           catch(Exception e)
+                           {
+                               UserError.Log.e(TAG,
+                                               "Got exception in plugin: " + e);
+                               e.printStackTrace();
+                           }
+                       },
+                       throwable ->
+                       handleAuthenticationThrowable(throwable, parent));
+
         return true;
     }
 
+
+
+    private static void abandonOnePlusSlowAuthentication(
+        final Ob1G5CollectionService parent,
+        final String reason)
+    {
+        synchronized(parent)
+        {
+            if(parent.getState()
+               == Ob1G5CollectionService.STATE.CHECK_AUTH)
+            {
+                UserError.Log.e(TAG,
+                                reason
+                                + " - closing until next scheduled wake");
+
+                parent.incrementErrors();
+                parent.setPreScanFailureMarker();
+                parent.savePersist();
+                parent.changeState(
+                    Ob1G5CollectionService.STATE.CLOSE);
+            }
+            else
+            {
+                UserError.Log.d(TAG,
+                                "ONE+: ignoring slow-auth abort because state="
+                                + parent.getState());
+            }
+        }
+    }
+
+    
     @SuppressLint("CheckResult")
     private static void handleAuthenticationWrite(final Ob1G5CollectionService parent, final RxBleConnection connection) {
         final int specifiedSlot = Pref.getBooleanDefaultFalse("engineering_mode") ? Pref.getStringToInt("dex_specified_slot", -1) : -1;
@@ -441,12 +598,53 @@ public class Ob1G5StateMachine {
                 );
     }
 
-    private static void handleAuthenticationThrowable(final Throwable throwable, final Ob1G5CollectionService parent) {
-        if (!(throwable instanceof OperationSuccess)) {
+    private static void handleAuthenticationThrowable(final Throwable throwable, final Ob1G5CollectionService parent)
+    {
+        /*
+         * ONE+: an authentication failure can produce several callbacks from
+         * the same dying GATT connection. Count the connection failure once,
+         * close it and wait for the next normal transmitter wake rather than
+         * immediately scanning/reconnecting.
+         */
+        if(shortTxId()
+           && (throwable instanceof BleDisconnectedException
+               || throwable instanceof BleGattCharacteristicException
+               || throwable instanceof BleCannotSetCharacteristicNotificationException))
+        {
+            synchronized(parent)
+            {
+                if(parent.getState() == Ob1G5CollectionService.STATE.CHECK_AUTH)
+                {
+                    UserError.Log.e(TAG,
+                                    "ONE+: authentication connection failed - "
+                                    + "closing until next scheduled wake: "
+                                    + throwable);
+
+                    parent.incrementErrors();
+                    parent.setPreScanFailureMarker();
+                    parent.savePersist();
+                    parent.changeState(Ob1G5CollectionService.STATE.CLOSE);
+                    return;
+                }
+
+                if(parent.getState() == Ob1G5CollectionService.STATE.CLOSE
+                   || parent.getState() == Ob1G5CollectionService.STATE.CLOSED)
+                {
+                    UserError.Log.d(TAG,
+                                    "ONE+: ignoring stale authentication throwable "
+                                    + "while closing: "
+                                    + throwable);
+                    return;
+                }
+            }
+        }
+        
+        if (!(throwable instanceof OperationSuccess))
+        {
             // RGI add this
             if(shortTxId()
-               && throwable instanceof BleCannotSetCharacteristicNotificationException) {
-
+               && throwable instanceof BleCannotSetCharacteristicNotificationException)
+            {
                 UserError.Log.e(TAG,
                                 "ONE+: characteristic notification setup failed - "
                                 + "abandoning connection cleanly: "
@@ -456,7 +654,8 @@ public class Ob1G5StateMachine {
                 return;
             }
 
-            if(throwable instanceof OnePlusSlowGattException) {
+            if(throwable instanceof OnePlusSlowGattException)
+            {
                 UserError.Log.e(TAG,
                                 throwable.getMessage()
                                 + " - abandoning connection");
@@ -466,15 +665,20 @@ public class Ob1G5StateMachine {
 
             if (((parent.getState() == Ob1G5CollectionService.STATE.CLOSED)
                     || (parent.getState() == Ob1G5CollectionService.STATE.CLOSE))
-                    && (throwable instanceof BleDisconnectedException)) {
+                    && (throwable instanceof BleDisconnectedException))
+            {
                 UserError.Log.d(TAG, "normal authentication notification throwable: (" + parent.getState() + ") " + throwable + " " + JoH.dateTimeText(tsl()));
                 parent.connectionStateChange(CLOSED_OK_TEXT);
-            } else if ((parent.getState() == Ob1G5CollectionService.STATE.BOND) && (throwable instanceof TimeoutException)) {
+            }
+            else if ((parent.getState() == Ob1G5CollectionService.STATE.BOND) && (throwable instanceof TimeoutException))
+            {
                 // TODO Trigger on Error count / Android wear metric
                 // UserError.Log.e(TAG,"Attempting to reset/create bond due to: "+throwable);
                 // parent.reset_bond(true);
                 // parent.unBond(); // WARN
-            } else {
+            }
+            else
+            {
                 UserError.Log.d(TAG, "authentication notification  throwable: (" + parent.getState() + ") " + throwable + " " + JoH.dateTimeText(tsl()));
                 parent.incrementErrors();
 
@@ -1191,16 +1395,52 @@ public class Ob1G5StateMachine {
         Inevitable.task("Ob1G5 disconnect", 500 + guardTime + speakSlowlyDelay(), () -> disconnectNow(parent, connection));
     }
 
+    /*
     @SuppressLint("CheckResult")
     private static void disconnectNow(Ob1G5CollectionService parent, RxBleConnection connection) {
         // tell device to disconnect now
         UserError.Log.d(TAG, "Disconnect NOW: " + JoH.dateTimeText(tsl()));
         speakSlowly();
         connection.writeCharacteristic(Control, nn(new DisconnectTxMessage().byteSequence))
-                .timeout(2, TimeUnit.SECONDS)
-                //  .observeOn(Schedulers.newThread())
-                //  .subscribeOn(Schedulers.newThread())
-                .subscribe(disconnectValue -> {
+    */
+
+    @SuppressLint("CheckResult")
+    private static void disconnectNow(Ob1G5CollectionService parent,
+                                      RxBleConnection connection)
+    {
+        UserError.Log.d(TAG,
+                        "Disconnect NOW: "
+                        + JoH.dateTimeText(tsl()));
+
+        /*
+         * ONE+ experiment:
+         *
+         * Do not send the transmitter's explicit DisconnectTxMessage.
+         * Instead close our RxBle connection locally and see whether
+         * the good/bad alternating connection pattern disappears.
+         */
+        if(shortTxId())
+        {
+            UserError.Log.d(TAG,
+                            "ONE+: skipping DisconnectTxMessage; "
+                            + "closing connection locally");
+
+            parent.changeState(
+                Ob1G5CollectionService.STATE.CLOSE);
+
+            return;
+        }
+
+        // Normal G5/G6 behaviour.
+        speakSlowly();
+
+        connection.writeCharacteristic(
+            Control,
+            nn(new DisconnectTxMessage().byteSequence))
+            .timeout(2, TimeUnit.SECONDS)
+            //  .observeOn(Schedulers.newThread())
+            //  .subscribeOn(Schedulers.newThread())
+            .subscribe(disconnectValue -> {
                     if (d) UserError.Log.d(TAG, "Wrote disconnect request");
                     parent.changeState(Ob1G5CollectionService.STATE.CLOSE);
                     throw new OperationSuccess("Requested Disconnect");
@@ -1798,7 +2038,10 @@ public class Ob1G5StateMachine {
             }
             lastGlucoseBgReading = bgReading;
             lastUsableGlucosePacket = lastGlucosePacket;
-            parent.lastUsableGlucosePacketTime = lastUsableGlucosePacket;
+            // RGI comment out
+            //parent.lastUsableGlucosePacketTime = lastUsableGlucosePacket;
+            // replace with
+            parent.setLastUsableGlucosePacketTime(lastUsableGlucosePacket);
             if (glucose.getPredictedGlucose() != null) {
                 // not really supported on wear yet
                 if (!android_wear) {
